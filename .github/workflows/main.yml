@@ -2,21 +2,30 @@ name: Update Feed
 on:
   schedule:
     - cron: '0 * * * *' # Runs every hour
-  workflow_dispatch: # Allows manual run
+  workflow_dispatch: # Allows you to run it manually
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # This gives the bot permission to save the feed.xml
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          
       - name: Run Script
         run: |
           pip install requests
           python generate_rss.py
+          
       - name: Commit and Push
         run: |
-          git config --global user.name 'bot'
-          git config --global user.email 'bot@bot.com'
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add feed.xml
-          git commit -m "update feed" || exit 0
+          git commit -m "Update SEC feed" || exit 0
           git push
