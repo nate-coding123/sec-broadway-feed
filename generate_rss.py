@@ -4,7 +4,7 @@ import sys
 
 # THE SECRET SAUCE: These headers make the SEC think we are their own search page
 HEADERS = {
-    'User-Agent': 'Research Project (yourname@email.com)',
+    'User-Agent': 'Research Project (nate@coltonkids.com)',
     'Accept': 'application/json, text/javascript, */*; q=0.01',
     'Host': 'search.sec.gov',
     'Referer': 'https://www.sec.gov/edgar/search/',
