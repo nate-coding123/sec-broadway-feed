@@ -1,67 +1,71 @@
 import requests
 import xml.etree.ElementTree as ET
 import sys
-from datetime import datetime
 
-# SEC REQUIRES a specific User-Agent format
-# REPLACE 'yourname@email.com' with your actual email
+# SEC REQUIRES a real-looking User-Agent with an email
 HEADERS = {
     'User-Agent': 'Research Project (nate@coltonkids.com)',
-    'Accept-Encoding': 'gzip, deflate',
-    'Host': 'search.sec.gov'
+    'Accept-Encoding': 'gzip, deflate'
 }
 
 def get_sec_data():
-    # This query searches for the phrase in the entity name field
-    # We set 'size' to 100 to get a large historical chunk
-    url = 'https://search.sec.gov/edgar/search/v1/search.json'
-    params = {
-        'q': '"Broadway Ltd Liability Co"',
-        'from': 0,
-        'size': 100
-    }
+    # 1. Get the master list of all CIKs (Company IDs) from the stable data site
+    # This URL is much more reliable than the search URL
+    index_url = "https://www.sec.gov/files/company_tickers.json"
     
     try:
-        print("Searching all entities for 'Broadway Ltd Liability Co'...")
-        res = requests.get(url, params=params, headers=HEADERS, timeout=20)
+        print("Fetching SEC company index...")
+        res = requests.get(index_url, headers=HEADERS, timeout=15)
         res.raise_for_status()
-        data = res.json()
+        companies = res.json()
         
-        hits = data.get('hits', {}).get('hits', [])
-        if not hits:
-            print("No filings found across any entities.")
+        # 2. Find all companies matching your string
+        # We search the 'title' field for your specific string
+        target_string = "Broadway Ltd Liability Co".upper()
+        matched_ciks = []
+        for key in companies:
+            if target_string in companies[key]['title'].upper():
+                matched_ciks.append({
+                    'cik': str(companies[key]['cik_str']).zfill(10),
+                    'name': companies[key]['title']
+                })
+        
+        if not matched_ciks:
+            print("No companies found with that name.")
             return None
 
-        # Create RSS Structure
+        # 3. Build the RSS
         rss = ET.Element("rss", version="2.0")
         channel = ET.SubElement(rss, "channel")
-        ET.SubElement(channel, "title").text = "Broadway Ltd Entity Filings"
-        ET.SubElement(channel, "link").text = "https://www.sec.gov/edgar/search/"
-        ET.SubElement(channel, "description").text = "Aggregate feed for all companies matching 'Broadway Ltd Liability Co'"
+        ET.SubElement(channel, "title").text = "Broadway Ltd Combined Feed"
+        ET.SubElement(channel, "link").text = "https://www.sec.gov"
 
-        for hit in hits:
-            s = hit['_source']
-            item = ET.SubElement(channel, "item")
+        # 4. For each matched company, get their recent filings
+        for company in matched_ciks:
+            print(f"Fetching filings for: {company['name']} (CIK {company['cik']})")
+            filing_url = f"https://data.sec.gov/submissions/CIK{company['cik']}.json"
+            f_res = requests.get(filing_url, headers=HEADERS, timeout=15)
+            f_data = f_res.json()
             
-            # --- CUSTOM HEADLINE ---
-            # Includes Company Name + Form Type + Date
-            company_name = s.get('display_names', ['Unknown'])[0]
-            form_type = s.get('file_type', 'Filing')
-            file_date = s.get('file_date', 'Unknown Date')
+            recent = f_data.get('filings', {}).get('recent', {})
             
-            item_title = f"{company_name} | {form_type} | {file_date}"
-            ET.SubElement(item, "title").text = item_title
-            
-            # URL Construction
-            # Search API uses 'adsh' (Accession Number) and CIKs
-            cik = s['ciks'][0]
-            acc_no = s['adsh'].replace('-', '')
-            doc = s['primary_doc']
-            link = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/{doc}"
-            
-            ET.SubElement(item, "link").text = link
-            ET.SubElement(item, "guid", isPermaLink="false").text = s['adsh']
-            ET.SubElement(item, "pubDate").text = file_date
+            # Loop through the last 10 filings per company to keep the feed clean
+            for i in range(min(10, len(recent.get('accessionNumber', [])))):
+                acc_no = recent['accessionNumber'][i]
+                form = recent['form'][i]
+                date = recent['filingDate'][i]
+                doc = recent['primaryDocument'][i]
+                
+                item = ET.SubElement(channel, "item")
+                # --- YOUR CUSTOM TITLE ---
+                item_title = f"{company['name']} | {form} | {date}"
+                ET.SubElement(item, "title").text = item_title
+                
+                clean_acc = acc_no.replace('-', '')
+                link = f"https://www.sec.gov/Archives/edgar/data/{company['cik']}/{clean_acc}/{doc}"
+                ET.SubElement(item, "link").text = link
+                ET.SubElement(item, "guid").text = acc_no
+                ET.SubElement(item, "pubDate").text = date
 
         return ET.tostring(rss, encoding='unicode')
 
@@ -73,4 +77,4 @@ xml_output = get_sec_data()
 if xml_output:
     with open("feed.xml", "w") as f:
         f.write(xml_output)
-    print(f"Success! Generated feed with {xml_output.count('<item>')} entries.")
+    print("Success!")
