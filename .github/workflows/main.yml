@@ -1,0 +1,22 @@
+name: Update Feed
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows manual run
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Run Script
+        run: |
+          pip install requests
+          python generate_rss.py
+      - name: Commit and Push
+        run: |
+          git config --global user.name 'bot'
+          git config --global user.email 'bot@bot.com'
+          git add feed.xml
+          git commit -m "update feed" || exit 0
+          git push
