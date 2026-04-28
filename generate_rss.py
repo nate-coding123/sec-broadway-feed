@@ -24,37 +24,44 @@ def get_sec_data():
             content = f.read().decode('latin-1')
         
         lines = content.split('\n')
-        
-        # --- THE REGEX FIX ---
-        # This looks for the 4 words in order, with anything (.*?) in between
-        # \b ensures we match whole words only
         pattern = re.compile(r"BROADWAY.*?LTD.*?LIABILITY.*?CO", re.IGNORECASE)
         
+        all_matches = []
+
+        for line in lines:
+            if pattern.search(line):
+                parts = line.split('|')
+                if len(parts) >= 5:
+                    all_matches.append({
+                        'cik': parts[0],
+                        'name': parts[1],
+                        'form': parts[2],
+                        'date': parts[3],
+                        'path': parts[4]
+                    })
+
+        # --- SORTING LOGIC ---
+        # Sorts by 'date' string (YYYY-MM-DD) in reverse (most recent first)
+        all_matches.sort(key=lambda x: x['date'], reverse=True)
+
+        # Build RSS
         rss = ET.Element("rss", version="2.0")
         channel = ET.SubElement(rss, "channel")
         ET.SubElement(channel, "title").text = "Broadway Ltd Search Feed"
         ET.SubElement(channel, "link").text = "https://www.sec.gov"
 
-        count = 0
-        for line in lines:
-            # We check the Regex pattern against the line
-            if pattern.search(line):
-                parts = line.split('|')
-                if len(parts) >= 5:
-                    cik, name, form, date, path = parts[0], parts[1], parts[2], parts[3], parts[4]
-                    
-                    item = ET.SubElement(channel, "item")
-                    # CUSTOM HEADLINE
-                    item_title = f"{name} | {form} | {date}"
-                    ET.SubElement(item, "title").text = item_title
-                    
-                    link = f"https://www.sec.gov/Archives/{path.replace('.txt', '-index.html')}"
-                    ET.SubElement(item, "link").text = link
-                    ET.SubElement(item, "guid").text = path
-                    ET.SubElement(item, "pubDate").text = date
-                    count += 1
+        for entry in all_matches:
+            item = ET.SubElement(channel, "item")
+            # CUSTOM HEADLINE
+            item_title = f"{entry['name']} | {entry['form']} | {entry['date']}"
+            ET.SubElement(item, "title").text = item_title
+            
+            link = f"https://www.sec.gov/Archives/{entry['path'].replace('.txt', '-index.html')}"
+            ET.SubElement(item, "link").text = link
+            ET.SubElement(item, "guid").text = entry['path']
+            ET.SubElement(item, "pubDate").text = entry['date']
 
-        print(f"Successfully found {count} filings matching the pattern.")
+        print(f"Successfully found and sorted {len(all_matches)} filings.")
         return ET.tostring(rss, encoding='unicode')
 
     except Exception as e:
