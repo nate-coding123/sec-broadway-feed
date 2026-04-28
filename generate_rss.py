@@ -1,81 +1,71 @@
 import requests
 import xml.etree.ElementTree as ET
 import sys
+import gzip
+import io
 
-# THE SECRET SAUCE: These headers make the SEC think we are their own search page
+# SEC MANDATORY HEADERS
+# You MUST put a real email address here or you will get "Access Denied"
 HEADERS = {
-    'User-Agent': 'Research Project (nate@coltonkids.com)',
-    'Accept': 'application/json, text/javascript, */*; q=0.01',
-    'Host': 'search.sec.gov',
-    'Referer': 'https://www.sec.gov/edgar/search/',
-    'Origin': 'https://www.sec.gov'
+    'User-Agent': 'Research Project (nate@coltonkids.com)', 
+    'Accept-Encoding': 'gzip, deflate',
+    'Host': 'www.sec.gov'
 }
 
 def get_sec_data():
-    # Correct Endpoint: search.sec.gov (NOT www.sec.gov)
-    url = 'https://search.sec.gov/edgar/search/v1/search.json'
-    
-    # Building the query exactly how the website does it
-    payload = {
-        "q": "\"Broadway Ltd Liability Co\"",
-        "from": 0,
-        "size": 100
-    }
+    # We are using the QTR2 2026 index (current quarter)
+    # The .gz version is better for avoiding 'Access Denied' triggers
+    url = "https://www.sec.gov/Archives/edgar/full-index/2026/QTR2/master.gz"
     
     try:
-        print("Pinging the SEC Search API...")
-        # We use 'json=payload' because this API expects a POST request, not a GET
-        res = requests.post(url, json=payload, headers=HEADERS, timeout=20)
+        print(f"Fetching SEC index from {url}...")
+        response = requests.get(url, headers=HEADERS, timeout=30)
         
-        if res.status_code == 404:
-            print("Error: SEC returned 404. Checking alternative endpoint...")
-            # Fallback to GET if POST fails
-            res = requests.get(url, params=payload, headers=HEADERS, timeout=20)
+        if response.status_code == 403:
+            print("ERROR: Access Denied. Check your User-Agent email.")
+            return None
             
-        res.raise_for_status()
-        data = res.json()
+        response.raise_for_status()
         
-        hits = data.get('hits', {}).get('hits', [])
+        # Decompress the GZIP data
+        with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as f:
+            content = f.read().decode('latin-1')
+        
+        lines = content.split('\n')
+        search_phrase = "BROADWAY LTD LIABILITY CO"
         
         rss = ET.Element("rss", version="2.0")
         channel = ET.SubElement(rss, "channel")
         ET.SubElement(channel, "title").text = "Broadway Ltd Filings"
-        ET.SubElement(channel, "link").text = "https://www.sec.gov/edgar/search/"
+        ET.SubElement(channel, "link").text = "https://www.sec.gov"
 
-        if not hits:
-            print("No hits found.")
-            item = ET.SubElement(channel, "item")
-            ET.SubElement(item, "title").text = "No filings found"
-            return ET.tostring(rss, encoding='unicode')
+        count = 0
+        for line in lines:
+            if search_phrase in line.upper():
+                parts = line.split('|')
+                if len(parts) >= 5:
+                    cik, name, form, date, path = parts[0], parts[1], parts[2], parts[3], parts[4]
+                    
+                    item = ET.SubElement(channel, "item")
+                    # CUSTOM HEADLINE
+                    item_title = f"{name} | {form} | {date}"
+                    ET.SubElement(item, "title").text = item_title
+                    
+                    # Convert raw path to a clickable HTML link
+                    link = f"https://www.sec.gov/Archives/{path.replace('.txt', '-index.html')}"
+                    ET.SubElement(item, "link").text = link
+                    ET.SubElement(item, "guid").text = path
+                    ET.SubElement(item, "pubDate").text = date
+                    count += 1
 
-        for hit in hits:
-            s = hit['_source']
-            item = ET.SubElement(channel, "item")
-            
-            # Custom Headline
-            company = s.get('display_names', ['Unknown'])[0]
-            form = s.get('file_type', 'Filing')
-            date = s.get('file_date', 'Unknown')
-            ET.SubElement(item, "title").text = f"{company} | {form} | {date}"
-            
-            # Link Construction
-            cik = s['ciks'][0]
-            acc_no = s['adsh'].replace('-', '')
-            doc = s['primary_doc']
-            link = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no}/{doc}"
-            
-            ET.SubElement(item, "link").text = link
-            ET.SubElement(item, "guid").text = s['adsh']
-            ET.SubElement(item, "pubDate").text = date
-
+        print(f"Successfully found {count} filings.")
         return ET.tostring(rss, encoding='unicode')
 
     except Exception as e:
-        print(f"Failed to fetch data: {e}")
-        # Create a basic file so the build doesn't crash
-        return '<?xml version="1.0" ?><rss version="2.0"><channel><title>Error</title></channel></rss>'
+        print(f"Failed: {e}")
+        return None
 
-# Execution
 xml_output = get_sec_data()
-with open("feed.xml", "w") as f:
-    f.write(xml_output)
+if xml_output:
+    with open("feed.xml", "w") as f:
+        f.write(xml_output)
