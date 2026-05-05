@@ -13,7 +13,7 @@ HEADERS = {
 }
 
 def get_sec_data():
-    url = "https://www.sec.gov/Archives/edgar/full-index/2026/QTR2/master.gz"
+    url = "https://www.sec.gov/Archives/edgar/full-index/2026/QTR2/master.zip"
     
     try:
         print(f"Fetching SEC index from {url}...")
